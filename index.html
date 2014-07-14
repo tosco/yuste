@@ -1,0 +1,290 @@
+<!doctype><html><head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Odyssey.js Scroll</title>
+  <meta name="description" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="icon" type="image/x-icon" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+  <link rel="icon" type="image/png" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+
+  <link rel="stylesheet" href="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/themes/css/cartodb.css">
+  <link rel="stylesheet" href="http://cartodb.github.io/odyssey.js/sandbox/css/scroll.css">
+  <script src="http://cartodb.github.io/odyssey.js/vendor/modernizr-2.6.2.min.js"></script>
+</head>
+<body>
+  <div id="layout">
+    <!--<div class="progress-bar"></div>-->
+
+    <div class="inner-header">
+      <div id="header"></div>
+    </div>
+
+    <div id="map_pos">
+      <div id="map_container">
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <div id="content"></div>
+
+    <div id="credits">
+      <span class="title" id="title">Title</span>
+      <span class="author"><b id="author">By Name using</b> <a href="#">Odyssey.js</a><span>
+    </span></span></div>
+  </div> <!-- layout -->
+
+  <script src="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/cartodb.js"></script>
+  <script src="http://cartodb.github.io/odyssey.js/dist/odyssey.js" charset="UTF-8"></script>
+
+  <script>
+    O.Template({
+      init: function() {
+        var baseurl = this.baseurl = 'http://{s}.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+        var map = this.map = L.map('map',{
+          center: [0, 0],
+          zoom: 4
+        });
+
+        this.map.scrollWheelZoom.disable();
+
+        var basemap = this.basemap = L.tileLayer(baseurl, {
+          attribution: 'data OSM - map CartoDB'
+        }).addTo(map);
+
+        var story = O.Story()
+
+        this.story = story;
+        this.miniprogressbar = O.MiniProgressBar();
+
+        // trigger when  map_pos go out of the screen
+        this.edge = O.Edge(
+          O.Triggers.Scroll().less('map_pos').offset(0),
+          O.Triggers.Scroll().greater('map_pos').offset(0)
+        )
+      },
+
+      update: function(actions) {
+        var self = this;
+
+        this.story.clear();
+
+        if (this.baseurl && (this.baseurl !== actions.global.baseurl)) {
+          this.baseurl = actions.global.baseurl || 'http://0.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+
+          this.basemap.setUrl(this.baseurl);
+        }
+
+        if (this.cartoDBLayer && ("http://"+self.cartoDBLayer.options.user_name+".cartodb.com/api/v2/viz/"+self.cartoDBLayer.options.layer_definition.stat_tag+"/viz.json" !== actions.global.vizjson)) {
+          this.map.removeLayer(this.cartoDBLayer);
+
+          this.cartoDBLayer = null;
+          this.created = false;
+        }
+
+        if (actions.global.vizjson && !this.cartoDBLayer) {
+          if (!this.created) { // sendCode debounce < vis loader
+            cdb.vis.Loader.get(actions.global.vizjson, function(vizjson) {
+              self.map.fitBounds(vizjson.bounds);
+
+              cartodb.createLayer(self.map, vizjson)
+                .done(function(layer) {
+                  self.cartoDBLayer = layer;
+
+                  var sublayer = layer.getSubLayer(0),
+                      layer_name = layer.layers[0].options.layer_name,
+                      filter = actions.global.cartodb_filter ? " WHERE "+actions.global.cartodb_filter : "";
+
+                  sublayer.setSQL("SELECT * FROM "+layer_name+filter)
+
+                  self.map.addLayer(layer);
+
+                  self._resetActions(actions);
+                }).on('error', function(err) {
+                  console.log("some error occurred: " + err);
+                });
+            });
+
+            this.created = true;
+          }
+
+          return;
+        }
+
+        this._resetActions(actions);
+      },
+
+      _resetActions: function(actions) {
+        // update footer title and author
+        var title_ = actions.global.title === undefined ? '' : actions.global.title,
+            author_ = actions.global.author === undefined ? 'Using' : 'By '+actions.global.author+' using';
+
+        document.getElementById('title').innerHTML = title_;
+        document.getElementById('author').innerHTML = author_;
+        document.title = title_ + " | " + author_ +' Odyssey.js';
+
+        var TRIGGER_LINE = this.map.getSize().y + 50;
+        this.story.addEvent(
+          this.edge,
+          O.Parallel(
+            O.Actions.CSS($('#map_container')).toggleClass('attachTop'),
+            O.Actions.CSS($('#content')).toggleClass('attachMap'),
+            O.Actions.Debug().log('attach')
+          )
+        )
+
+        // create content
+        var content = '';
+
+        var slide_ = actions[0];
+        $('#header').html(slide_.html());
+
+        this.story
+          .addState(
+            O.Scroll().within($('#header')),
+            slide_(this)
+          );
+
+        for(var i = 1; i < actions.length; ++i) {
+          var slide = actions[i];
+          content += "<div id='s_" + i +"'>" + slide.html() + "</div>";
+        }
+
+        $('#content').html(content);
+
+        // first slide is the header, skip it
+        for(var i = 1; i < actions.length; ++i) {
+          var slide = actions[i];
+          this.story.addState(
+            O.Triggers.Scroll().within('s_' + i).offset(TRIGGER_LINE),
+            O.Parallel(
+              slide(this),
+              this.miniprogressbar.percent(100*i/(actions.length - 1))
+            )
+          )
+        }
+
+        if(window.scrollY === 0) {
+          this.story.go(0);
+        }
+      }
+    });
+  </script>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-20934186-21', 'cartodb.github.io');
+    ga('send', 'pageview');
+  </script>
+
+
+<script id="md_template" type="text/template">```
+-baseurl: "http://{s}.tiles.mapbox.com/v3/mato.map-6nddt5ds/{z}/{x}/{y}.png"
+-title: "Luís Álvarez Yuste"
+-author: "Lidia Bocanegra"
+-vizjson:  "http://mautos.cartodb.com/api/v2/viz/877e8fa8-0b76-11e4-966a-0e73339ffa50/viz.json"
+```
+
+#Luís Álvarez Yuste
+
+![Luís Álvarez Yuste](http://www.lbocanegra.eu/UserFiles/Image/LAY_esc.jpg)
+
+##El poeta de los guerrilleros
+
+#Madrid
+```
+L.marker([40.4130, -3.6904]).actions.addRemove(S.map)
+- center: [40.4130, -3.6904]
+- zoom: 6
+```
+Nace en Madrid, barrio de El Lavapiés, el 2 de mayo de 1907. Su padre fue un funcionario de prisiones siendo trasladado, hacia finales de la década de 1920, a la ciudad de Barcelona en donde desempeñaría su trabajo indistintamente tanto en el castillo de Montjuïc como en la cárcel Modelo.
+
+#Barcelona
+```
+L.marker([41.3923, 2.1465]).actions.addRemove(S.map)
+- center: [41.4510, 2.1588]
+- zoom: 6
+```
+
+Luís llega a la ciudad condal, junto con su madre y sus cinco hermanos, el 19 de octubre de 1920.
+
+En 1921 siendo un adolescente funda una pequeña biblioteca, junto a tres de sus mejores amigos, denominada Agrupación Amigos de la Cultura.
+Fue durante esta época en donde Luís pudo entablar amistad con Fermín Galán, gracias al trabajo de su padre quien le había puesto en contacto con el mismo, siendo un personaje que le marcaría profundamente reproduciendo aquellas conversaciones que mantuvo con él en sus memorias.
+
+#Barcelona
+```
+L.marker([41.3923, 2.1465]).actions.addRemove(S.map)
+- center: [41.4510, 2.1588]
+- zoom: 8
+```
+
+En 1931, Luís Álvarez fue nombrado Secretario General ad honorem del Sindicato General de Luz y Fuerza de Cataluña y Aragón (ubicado en Barcelona) a través de la Compañía de Electricidad en donde él trabajaba.
+
+#Frente de Las Rosas y Brunete
+```
+L.marker([40.400102,-3.993606]).actions.addRemove(S.map)
+- center: [40.400102,-3.993606]
+- zoom: 6
+```
+
+Afiliado al Partido Socialista Unificado de Cataluña (PSUC), en 1937 sale de la Escuela Popular de Guerra de Barcelona con el grado de teniente siendo enviado al frente de Las Rosas y Brunete enrolado en el Batallón Djakovich, citado en el texto como Balcánico o Yugoslavo, el cual pertenecía a la 45ª División de las llamadas Brigadas Internacionales.
+
+#Ofensiva de Zaragoza
+```
+L.marker([41.6524, -0.9283]).actions.addRemove(S.map)
+- center: [41.6401, -0.9009]
+- zoom: 6
+```
+Más tarde se le nombra comisario suplente y del frente de Madrid es trasladado con el batallón a luchar en la ofensiva de Zaragoza dirigida por el general republicano español: Sebastián Pozas Perea. Ya desde su actuación como teniente y comisario de batallón Luís mantiene serias divergencias con el comandante de la misma: Josip Broz Tito, quien fuera mariscal de Yugoslavia en 1943 y que durante la Guerra Civil española intervino bajo el pseudónimo de comandante Kristof, según refiere la memoria.
+
+#Albacete
+```
+L.marker([38.996507,-1.85799]).actions.addRemove(S.map)
+- center: [38.996507,-1.85799]
+- zoom: 6
+```
+Álvarez cae herido en la ofensiva de Zaragoza, tras su recuperación fue destinado a los Servicios Auxiliares en el Cuartel de las Brigadas Internacionales con asiento en Albacete. Allí lo destinaron al Batallón de Guardias e inmediatamente fue nombrado por André Marty, diputado comunista francés, Jefe del Servicio Español de Investigación y Vigilancia.
+
+#El final de la guerra
+```
+L.marker([41.979704,2.821359]).actions.addRemove(S.map)
+- center: [41.979704,2.821359]
+- zoom: 6
+```
+Finalmente, durante los últimos días de la contienda en Cataluña fue destinado al mando de una brigada para la defensade la ciudad de Girona, siempre con el grado de teniente.
+
+#El cruze de la frontera
+```
+L.marker([42.474123,2.864578]).actions.addRemove(S.map)
+- center: [42.474123,2.864578]
+- zoom: 6
+```
+Cruza la frontera con Francia el 14 de febrero de 1939 como réfugié politique a través del paso fronterizo de Le Perthus, siendo internado en el campo de concentración de Bram (departamento C, barracón 58) en el departamento del Aude de los Pirineos Orientales.
+
+#El campo de Bram
+```
+L.marker([43.244514, 2.114965]).actions.addRemove(S.map)
+- center: [43.244514, 2.114965]
+- zoom: 6
+```
+Fue internado en el campo de concentración de Bram (departamento C, barracón 58) en el departamento del Aude de los Pirineos Orientales. 
+Durante un año estuvo recluido en dicho campo formando parte de las Compagnies de Trevailleurs Étrangers y, más tarde, durante la Segunda Guerra Mundial, en las Fuerzas Francesas del Interior (F.F.I.) desde 1942 a 1945.
+
+
+
+#Su vida continua en Francia y Argentina
+```
+L.marker([-34.609636, -58.366694]).actions.addRemove(S.map)
+- center: [-34.609636, -58.366694]
+- zoom: 4
+```
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam gravida lectus ac libero pellentesque laoreet vel sed tellus. Morbi molestie ultrices augue sed sagittis. Morbi euismod odio nec augue venenatis, eu luctus leo blandit. Mauris quis porttitor ligula. Sed id neque fringilla, bibendum tellus nec, imperdiet lectus. Proin in nulla justo. Vivamus pellentesque tellus nec sem pellentesque euismod. Maecenas interdum est orci, eget placerat turpis vestibulum nec.
+
+#El retorno
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam gravida lectus ac libero pellentesque laoreet vel sed tellus. Morbi molestie ultrices augue sed sagittis. Morbi euismod odio nec augue venenatis, eu luctus leo blandit. Mauris quis porttitor ligula. Sed id neque fringilla, bibendum tellus nec, imperdiet lectus. Proin in nulla justo. Vivamus pellentesque tellus nec sem pellentesque euismod. Maecenas interdum est orci, eget placerat turpis vestibulum nec.</script></body></html>
